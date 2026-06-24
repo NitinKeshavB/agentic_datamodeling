@@ -1,0 +1,72 @@
+# sources.yml — register every source database the agent can connect to.
+#
+# Copy this file to sources.yml and fill in your values.
+# NEVER commit sources.yml — it is in .gitignore.
+#
+# Credential resolution for JDBC sources (in priority order):
+#   1. connection_string field below          (dev only — avoid for prod)
+#   2. Databricks secret  (secret_scope + secret_key)
+#   3. Environment variable  ADM_<secret_key> (local development)
+#
+# Store secrets once per workspace:
+#   databricks secrets create-scope adm --profile <profile>
+#   databricks secrets put-secret adm <secret_key> --string-value "<conn_str>" --profile <profile>
+
+sources:
+
+  # ------------------------------------------------------------------
+  # Databricks Unity Catalog
+  # ------------------------------------------------------------------
+  - name: unity_prod
+    type: unity_catalog
+    description: "Production Unity Catalog — curated common data model"
+    catalog: prod_catalog          # replace with your catalog name
+    schema: common_data_model      # replace with your schema name
+    # warehouse_id: abc123         # optional — auto-selected if omitted
+    tags: [databricks, prod]
+
+  - name: unity_dev
+    type: unity_catalog
+    description: "Dev Unity Catalog"
+    catalog: dev_catalog
+    schema: common_data_model
+    tags: [databricks, dev]
+
+  # ------------------------------------------------------------------
+  # PostgreSQL
+  # ------------------------------------------------------------------
+  - name: erp_postgres
+    type: postgresql
+    description: "ERP source database (PostgreSQL)"
+    schema: public
+    # Option A: Databricks secret (recommended for prod)
+    secret_scope: adm
+    secret_key: ERP_POSTGRES_CONNECTION_STRING
+    # Option B: env var for local dev — export ADM_ERP_POSTGRES_CONNECTION_STRING=postgresql+psycopg2://...
+    # Option C: inline (dev only — never commit passwords)
+    # connection_string: "postgresql+psycopg2://user:pass@host:5432/erp_db"
+    tags: [postgresql, erp, source]
+
+  # ------------------------------------------------------------------
+  # SQL Server
+  # ------------------------------------------------------------------
+  - name: crm_sqlserver
+    type: sqlserver
+    description: "CRM source database (SQL Server)"
+    schema: dbo
+    secret_scope: adm
+    secret_key: CRM_SQLSERVER_CONNECTION_STRING
+    # connection_string: "mssql+pyodbc://user:pass@host:1433/crm_db?driver=ODBC+Driver+17+for+SQL+Server"
+    tags: [sqlserver, crm, source]
+
+  # ------------------------------------------------------------------
+  # Azure SQL
+  # ------------------------------------------------------------------
+  - name: finance_azuresql
+    type: azuresql
+    description: "Finance database (Azure SQL)"
+    schema: dbo
+    secret_scope: adm
+    secret_key: FINANCE_AZURESQL_CONNECTION_STRING
+    # connection_string: "mssql+pyodbc://user:pass@server.database.windows.net:1433/finance?driver=ODBC+Driver+17+for+SQL+Server"
+    tags: [azuresql, finance, source]

@@ -1,0 +1,35 @@
+bundle:
+  name: agentic-datamodeling
+
+include:
+  - resources/*.yml
+
+artifacts:
+  agentic_datamodeling:
+    type: whl
+    path: .
+
+variables:
+  catalog:
+    description: "Unity Catalog catalog name"
+    default: "UC metastore"
+  schema:
+    description: "Unity Catalog schema name"
+    default: "agentic_datamodeling"
+  warehouse_id:
+    description: "SQL Warehouse ID to use for SQL tasks"
+    default: "b5c87ec01e14c5a6"
+  serving_endpoint:
+    description: "Databricks Model Serving endpoint name for the LLM"
+    default: "databricks-claude-opus-4-8"
+
+targets:
+  prod:
+    mode: production
+    workspace:
+      profile: prod
+      root_path: /Workspace/Shared/hackathon/${bundle.name}/${bundle.target}
+    variables:
+      catalog: "hackathon_demo"
+      schema: "snapshot_global_realestate"
+      serving_endpoint: "databricks-claude-opus-4-8"
