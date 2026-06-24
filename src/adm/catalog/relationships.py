@@ -2,18 +2,20 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 
 @dataclass
 class Relationship:
+    """A directed relationship between two tables, with a confidence score and detection method."""
+
     child_table: str
     child_column: str
     parent_table: str
     parent_column: str
-    relationship_type: str   # explicit_fk | inferred_name | inferred_pk_match
-    confidence: float        # 0.0 – 1.0
+    relationship_type: str  # explicit_fk | inferred_name | inferred_pk_match
+    confidence: float  # 0.0 – 1.0
     child_schema: str = ""
     parent_schema: str = ""
     constraint_name: Optional[str] = None
@@ -40,6 +42,7 @@ class RelationshipDetector:
     # ------------------------------------------------------------------
 
     def detect_explicit(self, foreign_keys: list[dict]) -> list[Relationship]:
+        """Convert raw FK constraint dicts into Relationship objects with confidence=1.0."""
         return [
             Relationship(
                 child_table=fk["child_table"],
@@ -84,16 +87,20 @@ class RelationshipDetector:
             key = (child_table, child_col, parent_table_info["name"], parent_col)
             if key not in existing:
                 existing.add(key)
-                relationships.append(Relationship(
-                    child_table=child_table,
-                    child_column=child_col,
-                    parent_table=parent_table_info["name"],
-                    parent_column=parent_col,
-                    child_schema=next((t["schema"] for t in tables if t["name"].lower() == child_table.lower()), ""),
-                    parent_schema=parent_table_info["schema"],
-                    relationship_type=rtype,
-                    confidence=confidence,
-                ))
+                relationships.append(
+                    Relationship(
+                        child_table=child_table,
+                        child_column=child_col,
+                        parent_table=parent_table_info["name"],
+                        parent_column=parent_col,
+                        child_schema=next(
+                            (t["schema"] for t in tables if t["name"].lower() == child_table.lower()), ""
+                        ),
+                        parent_schema=parent_table_info["schema"],
+                        relationship_type=rtype,
+                        confidence=confidence,
+                    )
+                )
 
         for table in tables:
             tname = table["name"].lower()
@@ -146,12 +153,10 @@ class RelationshipDetector:
         inferred = self.detect_by_column_naming(tables)
 
         # Suppress inferred relationships that are already explicit
-        explicit_keys = {
-            (r.child_table, r.child_column, r.parent_table, r.parent_column)
-            for r in explicit
-        }
+        explicit_keys = {(r.child_table, r.child_column, r.parent_table, r.parent_column) for r in explicit}
         unique_inferred = [
-            r for r in inferred
+            r
+            for r in inferred
             if (r.child_table, r.child_column, r.parent_table, r.parent_column) not in explicit_keys
         ]
 

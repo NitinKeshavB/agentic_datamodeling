@@ -12,6 +12,9 @@
 #   databricks secrets create-scope adm --profile <profile>
 #   databricks secrets put-secret adm <secret_key> --string-value "<conn_str>" --profile <profile>
 
+# deploy_job: true  →  make bundle-deploy automatically creates a Databricks job for this source.
+# deploy_job: false →  source is only used for local CLI / check-sources (default).
+
 sources:
 
   # ------------------------------------------------------------------
@@ -23,6 +26,7 @@ sources:
     catalog: prod_catalog          # replace with your catalog name
     schema: common_data_model      # replace with your schema name
     # warehouse_id: abc123         # optional — auto-selected if omitted
+    deploy_job: true               # creates a Databricks job on bundle deploy
     tags: [databricks, prod]
 
   - name: unity_dev
@@ -30,6 +34,7 @@ sources:
     description: "Dev Unity Catalog"
     catalog: dev_catalog
     schema: common_data_model
+    deploy_job: false
     tags: [databricks, dev]
 
   # ------------------------------------------------------------------
@@ -39,6 +44,8 @@ sources:
     type: postgresql
     description: "ERP source database (PostgreSQL)"
     schema: public
+    sslmode: require               # optional — appended to connection string automatically
+    deploy_job: true               # creates a Databricks job on bundle deploy
     # Option A: Databricks secret (recommended for prod)
     secret_scope: adm
     secret_key: ERP_POSTGRES_CONNECTION_STRING
@@ -54,6 +61,7 @@ sources:
     type: sqlserver
     description: "CRM source database (SQL Server)"
     schema: dbo
+    deploy_job: true
     secret_scope: adm
     secret_key: CRM_SQLSERVER_CONNECTION_STRING
     # connection_string: "mssql+pyodbc://user:pass@host:1433/crm_db?driver=ODBC+Driver+17+for+SQL+Server"
@@ -66,6 +74,7 @@ sources:
     type: azuresql
     description: "Finance database (Azure SQL)"
     schema: dbo
+    deploy_job: false
     secret_scope: adm
     secret_key: FINANCE_AZURESQL_CONNECTION_STRING
     # connection_string: "mssql+pyodbc://user:pass@server.database.windows.net:1433/finance?driver=ODBC+Driver+17+for+SQL+Server"

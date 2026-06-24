@@ -40,8 +40,7 @@ def create_connector(source_type: str, **kwargs) -> SourceConnector:
         )
 
     raise ValueError(
-        f"Unknown source_type '{source_type}'. "
-        f"Supported: unity_catalog, postgresql, sqlserver, azuresql"
+        f"Unknown source_type '{source_type}'. " f"Supported: unity_catalog, postgresql, sqlserver, azuresql"
     )
 
 

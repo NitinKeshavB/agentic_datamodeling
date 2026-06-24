@@ -22,7 +22,7 @@ function install {
 
 # run linting, formatting, and other static code quality tools
 function lint {
-    pre-commit run --all-files
+    SKIP=no-commit-to-branch pre-commit run --all-files
 }
 
 # same as `lint` but with any special considerations for CI

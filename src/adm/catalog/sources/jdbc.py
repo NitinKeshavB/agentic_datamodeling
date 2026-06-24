@@ -5,7 +5,15 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import urlparse
 
-from sqlalchemy import create_engine, inspect, func, select, text, MetaData, Table
+from sqlalchemy import (
+    MetaData,
+    Table,
+    create_engine,
+    func,
+    inspect,
+    select,
+    text,
+)
 from sqlalchemy.engine import Engine
 
 from adm.catalog.sources.base import SourceConnector
@@ -27,9 +35,27 @@ class JDBCConnector(SourceConnector):
     def __init__(self, connection_string: str, schema: str, source_type: str = "jdbc"):
         self._schema = schema
         self._source_type = source_type.lower()
-        self._connection_string = connection_string
-        self.engine: Engine = create_engine(connection_string, future=True)
-        self._catalog_name = self._parse_database_name(connection_string)
+        self._connection_string = self._normalise(connection_string, source_type)
+        self.engine: Engine = create_engine(self._connection_string, future=True)
+        self._catalog_name = self._parse_database_name(self._connection_string)
+
+    @staticmethod
+    def _normalise(conn_str: str, source_type: str) -> str:
+        """Pin the SQLAlchemy dialect driver so sslmode and other params work correctly.
+
+        postgresql://          → postgresql+psycopg2://  (asyncpg rejects sslmode)
+        postgresql+asyncpg://  → postgresql+psycopg2://  (same reason)
+        mssql://               → mssql+pyodbc://
+        """
+        st = source_type.lower()
+        if st in ("postgresql",):
+            if conn_str.startswith("postgresql://"):
+                return conn_str.replace("postgresql://", "postgresql+psycopg2://", 1)
+            if conn_str.startswith("postgresql+asyncpg://"):
+                return conn_str.replace("postgresql+asyncpg://", "postgresql+psycopg2://", 1)
+        if st in ("sqlserver", "azuresql") and conn_str.startswith("mssql://"):
+            return conn_str.replace("mssql://", "mssql+pyodbc://", 1)
+        return conn_str
 
     # ------------------------------------------------------------------
     # Identity
@@ -105,15 +131,17 @@ class JDBCConnector(SourceConnector):
                 for i, col in enumerate(raw_cols)
             ]
 
-            tables.append({
-                "name": table_name,
-                "schema": self._schema,
-                "full_name": f"{self._catalog_name}.{self._schema}.{table_name}",
-                "table_type": "TABLE",
-                "comment": inspector.get_table_comment(table_name, schema=self._schema).get("text"),
-                "columns": columns,
-                "primary_keys": primary_keys,
-            })
+            tables.append(
+                {
+                    "name": table_name,
+                    "schema": self._schema,
+                    "full_name": f"{self._catalog_name}.{self._schema}.{table_name}",
+                    "table_type": "TABLE",
+                    "comment": inspector.get_table_comment(table_name, schema=self._schema).get("text"),
+                    "columns": columns,
+                    "primary_keys": primary_keys,
+                }
+            )
 
         return tables
 
@@ -124,12 +152,14 @@ class JDBCConnector(SourceConnector):
         for table_name in inspector.get_table_names(schema=self._schema):
             pk = inspector.get_pk_constraint(table_name, schema=self._schema)
             for i, col in enumerate(pk.get("constrained_columns", [])):
-                rows.append({
-                    "table_schema": self._schema,
-                    "table_name": table_name,
-                    "column_name": col,
-                    "ordinal_position": i + 1,
-                })
+                rows.append(
+                    {
+                        "table_schema": self._schema,
+                        "table_name": table_name,
+                        "column_name": col,
+                        "ordinal_position": i + 1,
+                    }
+                )
         return rows
 
     def get_foreign_keys(self) -> list[dict]:
@@ -142,15 +172,17 @@ class JDBCConnector(SourceConnector):
                     fk.get("constrained_columns", []),
                     fk.get("referred_columns", []),
                 ):
-                    rows.append({
-                        "child_schema": self._schema,
-                        "child_table": table_name,
-                        "child_column": child_col,
-                        "parent_schema": fk.get("referred_schema") or self._schema,
-                        "parent_table": fk.get("referred_table", ""),
-                        "parent_column": parent_col,
-                        "constraint_name": fk.get("name"),
-                    })
+                    rows.append(
+                        {
+                            "child_schema": self._schema,
+                            "child_table": table_name,
+                            "child_column": child_col,
+                            "parent_schema": fk.get("referred_schema") or self._schema,
+                            "parent_table": fk.get("referred_table", ""),
+                            "parent_column": parent_col,
+                            "constraint_name": fk.get("name"),
+                        }
+                    )
         return rows
 
     # ------------------------------------------------------------------
@@ -160,7 +192,7 @@ class JDBCConnector(SourceConnector):
     def get_table_stats(self, table_ref: str) -> dict:
         """Return row count and null rates for each column."""
         # table_ref may be passed as schema.table or full_name — use schema.table only
-        table_name = table_ref.split(".")[-1].strip("`\"[]")
+        table_name = table_ref.split(".")[-1].strip('`"[]')
         meta = MetaData()
         tbl = Table(table_name, meta, schema=self._schema, autoload_with=self.engine)
 
@@ -172,16 +204,14 @@ class JDBCConnector(SourceConnector):
 
             null_rates: dict[str, float] = {}
             for col in tbl.columns:
-                null_count = conn.execute(
-                    select(func.count()).select_from(tbl).where(col.is_(None))
-                ).scalar() or 0
+                null_count = conn.execute(select(func.count()).select_from(tbl).where(col.is_(None))).scalar() or 0
                 null_rates[col.name] = round(null_count / row_count, 4)
 
         return {"row_count": row_count, "null_rates": null_rates}
 
     def sample_data(self, table_ref: str, n: int = 5) -> list[dict]:
         """Return n sample rows from the table."""
-        table_name = table_ref.split(".")[-1].strip("`\"[]")
+        table_name = table_ref.split(".")[-1].strip('`"[]')
         meta = MetaData()
         tbl = Table(table_name, meta, schema=self._schema, autoload_with=self.engine)
 
@@ -213,7 +243,7 @@ class JDBCConnector(SourceConnector):
 
     def check_duplicates(self, table_ref: str, key_columns: list[str]) -> dict:
         """Check for duplicate rows on the given key columns."""
-        table_name = table_ref.split(".")[-1].strip("`\"[]")
+        table_name = table_ref.split(".")[-1].strip('`"[]')
         meta = MetaData()
         tbl = Table(table_name, meta, schema=self._schema, autoload_with=self.engine)
 

@@ -8,7 +8,10 @@ import os
 from openai import OpenAI
 
 from adm.catalog.crawler import CatalogCrawler
-from adm.catalog.relationships import Relationship, RelationshipDetector
+from adm.catalog.relationships import (
+    Relationship,
+    RelationshipDetector,
+)
 from adm.catalog.sources import SourceConnector
 
 # OpenAI-compatible tool format (works with Databricks Model Serving external models)
@@ -43,9 +46,7 @@ TOOLS: list[dict] = [
             "description": "Get row count and per-column null rates for a table.",
             "parameters": {
                 "type": "object",
-                "properties": {
-                    "table_name": {"type": "string", "description": "Unqualified table name"}
-                },
+                "properties": {"table_name": {"type": "string", "description": "Unqualified table name"}},
                 "required": ["table_name"],
             },
         },
@@ -236,14 +237,10 @@ class CatalogAgent:
                 return json.dumps(meta["tables"], default=str)
 
             if name == "get_relationships":
-                return json.dumps(
-                    [r.to_dict() for r in self._get_relationships()], default=str
-                )
+                return json.dumps([r.to_dict() for r in self._get_relationships()], default=str)
 
             if name == "get_table_stats":
-                return json.dumps(
-                    self.crawler.get_table_stats(_full_ref(inputs["table_name"])), default=str
-                )
+                return json.dumps(self.crawler.get_table_stats(_full_ref(inputs["table_name"])), default=str)
 
             if name == "check_duplicates":
                 return json.dumps(
@@ -319,8 +316,10 @@ class CatalogAgent:
             for tc in tool_calls:
                 inputs = json.loads(tc.function.arguments or "{}")
                 result = self._dispatch_tool(tc.function.name, inputs)
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tc.id,
-                    "content": result,
-                })
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": result,
+                    }
+                )

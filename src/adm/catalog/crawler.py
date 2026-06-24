@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from adm.catalog.sources import SourceConnector, create_connector
+from adm.catalog.sources import (
+    SourceConnector,
+    create_connector,
+)
 
 
 class CatalogCrawler:
@@ -32,7 +35,9 @@ class CatalogCrawler:
     # ------------------------------------------------------------------
 
     @classmethod
-    def from_unity_catalog(cls, catalog: str, schema: str | None = None, warehouse_id: str | None = None) -> "CatalogCrawler":
+    def from_unity_catalog(
+        cls, catalog: str, schema: str | None = None, warehouse_id: str | None = None
+    ) -> "CatalogCrawler":
         """Create a crawler for a Databricks Unity Catalog schema."""
         return cls(create_connector("unity_catalog", catalog=catalog, schema=schema, warehouse_id=warehouse_id))
 
@@ -46,24 +51,31 @@ class CatalogCrawler:
     # ------------------------------------------------------------------
 
     def list_tables(self) -> list[dict]:
+        """Return table metadata dicts for all tables in the source schema."""
         return self.connector.list_tables()
 
     def get_primary_keys(self) -> list[dict]:
+        """Return PK constraint rows for all tables in the source schema."""
         return self.connector.get_primary_keys()
 
     def get_foreign_keys(self) -> list[dict]:
+        """Return FK constraint rows for all tables in the source schema."""
         return self.connector.get_foreign_keys()
 
     def execute_sql(self, sql: str) -> list[dict]:
+        """Execute a raw SQL string against the source and return rows as dicts."""
         return self.connector.execute_sql(sql)
 
     def get_table_stats(self, table_ref: str) -> dict:
+        """Return row count and per-column null rates for the given table."""
         return self.connector.get_table_stats(table_ref)
 
     def sample_data(self, table_ref: str, n: int = 5) -> list[dict]:
+        """Return up to n sample rows from the given table."""
         return self.connector.sample_data(table_ref, n)
 
     def check_duplicates(self, table_ref: str, key_columns: list[str]) -> dict:
+        """Return duplicate group and row counts for the given key columns."""
         return self.connector.check_duplicates(table_ref, key_columns)
 
     # ------------------------------------------------------------------

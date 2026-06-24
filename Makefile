@@ -34,7 +34,10 @@ bundle-validate: ## Validate bundle config for target env  e.g. make bundle-vali
 	@test -n "$(TARGET)" || (echo "Error: target env is required. Example: make bundle-validate uat"; exit 1)
 	databricks bundle validate -t $(TARGET)
 
-bundle-deploy: ## Build wheel + deploy jobs to target env  e.g. make bundle-deploy prod
+generate-jobs: ## Generate Databricks jobs from sources.yml (sources with deploy_job: true)
+	python scripts/generate_source_jobs.py
+
+bundle-deploy: generate-jobs ## Build wheel + deploy jobs to target env  e.g. make bundle-deploy prod
 	$(eval TARGET ?= $(word 2,$(MAKECMDGOALS)))
 	@test -n "$(TARGET)" || (echo "Error: target env is required. Example: make bundle-deploy uat"; exit 1)
 	databricks bundle deploy -t $(TARGET)

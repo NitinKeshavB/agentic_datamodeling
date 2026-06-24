@@ -12,13 +12,25 @@ Local development: set the connection string as an environment variable instead 
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import (
+    dataclass,
+    field,
+)
 from pathlib import Path
 from typing import Any
+from urllib.parse import (
+    parse_qs,
+    urlencode,
+    urlparse,
+    urlunparse,
+)
 
 import yaml
 
-from adm.catalog.sources import SourceConnector, create_connector
+from adm.catalog.sources import (
+    SourceConnector,
+    create_connector,
+)
 
 
 @dataclass
@@ -35,6 +47,8 @@ class SourceDefinition:
     connection_string: str | None = None
     secret_scope: str | None = None
     secret_key: str | None = None
+    # Optional SSL config — appended to the resolved connection string
+    sslmode: str | None = None
     # Freeform metadata
     description: str = ""
     tags: list[str] = field(default_factory=list)
@@ -62,10 +76,10 @@ class SourceRegistry:
     # ------------------------------------------------------------------
 
     def _load(self) -> None:
+        """Parse sources.yml and populate the internal definitions dict."""
         if not self._config_path.exists():
             raise FileNotFoundError(
-                f"sources.yml not found at '{self._config_path}'. "
-                "Create one from the sources.yml.example template."
+                f"sources.yml not found at '{self._config_path}'. " "Create one from the sources.yml.example template."
             )
 
         with open(self._config_path) as f:
@@ -81,6 +95,7 @@ class SourceRegistry:
                 connection_string=entry.get("connection_string"),
                 secret_scope=entry.get("secret_scope"),
                 secret_key=entry.get("secret_key"),
+                sslmode=entry.get("sslmode"),
                 description=entry.get("description", ""),
                 tags=entry.get("tags", []),
             )
@@ -90,7 +105,17 @@ class SourceRegistry:
     # Credential resolution
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _append_sslmode(conn_str: str, sslmode: str) -> str:
+        """Merge sslmode into the connection string query params without duplicating it."""
+        parsed = urlparse(conn_str)
+        params = parse_qs(parsed.query, keep_blank_values=True)
+        params["sslmode"] = [sslmode]
+        new_query = urlencode({k: v[0] for k, v in params.items()})
+        return urlunparse(parsed._replace(query=new_query))
+
     def _resolve_connection_string(self, defn: SourceDefinition) -> str:
+        """Resolve a JDBC connection string from inline config, Databricks secret, or env var."""
         # 1. Inline (dev only)
         if defn.connection_string:
             return defn.connection_string
@@ -121,9 +146,7 @@ class SourceRegistry:
                 f"or env var '{env_var}'."
             )
 
-        raise RuntimeError(
-            f"Source '{defn.name}' has no connection_string, secret_scope, or secret_key defined."
-        )
+        raise RuntimeError(f"Source '{defn.name}' has no connection_string, secret_scope, or secret_key defined.")
 
     # ------------------------------------------------------------------
     # Public API
@@ -156,6 +179,8 @@ class SourceRegistry:
 
         # JDBC sources
         conn_str = self._resolve_connection_string(defn)
+        if defn.sslmode:
+            conn_str = self._append_sslmode(conn_str, defn.sslmode)
         return create_connector(
             defn.source_type,
             connection_string=conn_str,

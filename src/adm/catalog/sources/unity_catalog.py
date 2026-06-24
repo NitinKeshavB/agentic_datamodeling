@@ -41,6 +41,7 @@ class UnityCatalogConnector(SourceConnector):
     # ------------------------------------------------------------------
 
     def _resolve_warehouse(self) -> str:
+        """Select the first running/starting SQL warehouse, falling back to any available."""
         warehouses = [w for w in self.w.warehouses.list() if w.state and w.state.value in ("RUNNING", "STARTING")]
         if not warehouses:
             warehouses = list(self.w.warehouses.list())
@@ -79,36 +80,42 @@ class UnityCatalogConnector(SourceConnector):
     # ------------------------------------------------------------------
 
     def list_tables(self) -> list[dict]:
+        """List all tables in the catalog/schema using the Databricks SDK."""
         schemas = [self._schema] if self._schema else self._list_schemas()
         tables = []
         for sc in schemas:
             for t in self.w.tables.list(catalog_name=self._catalog, schema_name=sc):
-                tables.append({
-                    "name": t.name,
-                    "schema": sc,
-                    "full_name": f"{self._catalog}.{sc}.{t.name}",
-                    "table_type": t.table_type.value if t.table_type else None,
-                    "comment": t.comment,
-                    "columns": [
-                        {
-                            "name": c.name,
-                            "type": c.type_text,
-                            "nullable": c.nullable,
-                            "comment": c.comment,
-                            "position": c.position,
-                        }
-                        for c in sorted(t.columns or [], key=lambda c: c.position or 0)
-                    ],
-                    "primary_keys": [],
-                })
+                tables.append(
+                    {
+                        "name": t.name,
+                        "schema": sc,
+                        "full_name": f"{self._catalog}.{sc}.{t.name}",
+                        "table_type": t.table_type.value if t.table_type else None,
+                        "comment": t.comment,
+                        "columns": [
+                            {
+                                "name": c.name,
+                                "type": c.type_text,
+                                "nullable": c.nullable,
+                                "comment": c.comment,
+                                "position": c.position,
+                            }
+                            for c in sorted(t.columns or [], key=lambda c: c.position or 0)
+                        ],
+                        "primary_keys": [],
+                    }
+                )
         return tables
 
     def _list_schemas(self) -> list[str]:
+        """Return all schema names in the catalog, excluding information_schema."""
         return [s.name for s in self.w.schemas.list(catalog_name=self._catalog) if s.name != "information_schema"]
 
     def get_primary_keys(self) -> list[dict]:
+        """Return PK constraint rows via information_schema.key_column_usage."""
         sc = self._schema or "%"
-        return self.execute_sql(f"""
+        return self.execute_sql(
+            f"""
         SELECT kcu.table_schema, kcu.table_name, kcu.column_name, kcu.ordinal_position
         FROM `{self._catalog}`.information_schema.key_column_usage kcu
         JOIN `{self._catalog}`.information_schema.table_constraints tc
@@ -118,11 +125,14 @@ class UnityCatalogConnector(SourceConnector):
         WHERE tc.constraint_type = 'PRIMARY KEY'
           AND kcu.table_schema LIKE '{sc}'
         ORDER BY kcu.table_schema, kcu.table_name, kcu.ordinal_position
-        """)
+        """
+        )
 
     def get_foreign_keys(self) -> list[dict]:
+        """Return FK constraint rows via information_schema.referential_constraints."""
         sc = self._schema or "%"
-        return self.execute_sql(f"""
+        return self.execute_sql(
+            f"""
         SELECT
             kcu.table_schema  AS child_schema,
             kcu.table_name    AS child_table,
@@ -146,13 +156,15 @@ class UnityCatalogConnector(SourceConnector):
             AND rc.constraint_schema  = tc.table_schema
         WHERE kcu.table_schema LIKE '{sc}'
         ORDER BY kcu.table_schema, kcu.table_name, kcu.ordinal_position
-        """)
+        """
+        )
 
     # ------------------------------------------------------------------
     # Data operations
     # ------------------------------------------------------------------
 
     def get_table_stats(self, table_ref: str) -> dict:
+        """Return row count and per-column null rates for the given table reference."""
         rows = self.execute_sql(f"SELECT COUNT(*) AS row_count FROM {table_ref}")
         row_count = int(rows[0]["row_count"]) if rows else 0
 
@@ -169,6 +181,7 @@ class UnityCatalogConnector(SourceConnector):
         return {"row_count": row_count, "null_rates": null_rates}
 
     def sample_data(self, table_ref: str, n: int = 5) -> list[dict]:
+        """Return up to n sample rows from the given table reference."""
         return self.execute_sql(f"SELECT * FROM {table_ref} LIMIT {n}")
 
     def ping(self) -> dict:
@@ -192,8 +205,10 @@ class UnityCatalogConnector(SourceConnector):
             }
 
     def check_duplicates(self, table_ref: str, key_columns: list[str]) -> dict:
+        """Return duplicate group and row counts for the given key columns."""
         keys = ", ".join(f"`{c}`" for c in key_columns)
-        rows = self.execute_sql(f"""
+        rows = self.execute_sql(
+            f"""
         SELECT COUNT(*) AS duplicate_groups, SUM(cnt - 1) AS duplicate_rows
         FROM (
             SELECT {keys}, COUNT(*) AS cnt
@@ -201,7 +216,8 @@ class UnityCatalogConnector(SourceConnector):
             GROUP BY {keys}
             HAVING COUNT(*) > 1
         )
-        """)
+        """
+        )
         if rows:
             return {
                 "duplicate_groups": int(rows[0]["duplicate_groups"] or 0),

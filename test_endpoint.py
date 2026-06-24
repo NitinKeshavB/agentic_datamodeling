@@ -5,9 +5,7 @@ import os
 from openai import OpenAI
 
 DATABRICKS_TOKEN = os.environ.get("DATABRICKS_TOKEN", "")
-DATABRICKS_HOST = os.environ.get(
-    "DATABRICKS_HOST", "https://adb-3328600036097005.5.azuredatabricks.net"
-)
+DATABRICKS_HOST = os.environ.get("DATABRICKS_HOST", "https://adb-3328600036097005.5.azuredatabricks.net")
 SERVING_ENDPOINT = os.environ.get("SERVING_ENDPOINT", "databricks-claude-opus-4-8")
 
 client = OpenAI(

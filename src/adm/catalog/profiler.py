@@ -8,10 +8,10 @@ from typing import Any
 
 from adm.catalog.crawler import CatalogCrawler
 
-
 # ---------------------------------------------------------------------------
 # Stats helpers
 # ---------------------------------------------------------------------------
+
 
 def _col_stats(col_name: str, rows: list[dict]) -> dict:
     """Compute basic column statistics from sample rows."""
@@ -58,10 +58,7 @@ def _profile_table(crawler: CatalogCrawler, table: dict, n: int = 10) -> dict:
     except Exception as exc:  # noqa: BLE001
         return {"error": str(exc), "sample_rows": [], "column_profiles": {}}
 
-    col_profiles = {
-        col["name"]: _col_stats(col["name"], rows)
-        for col in table["columns"]
-    }
+    col_profiles = {col["name"]: _col_stats(col["name"], rows) for col in table["columns"]}
 
     return {
         "sample_rows": rows,
@@ -72,6 +69,7 @@ def _profile_table(crawler: CatalogCrawler, table: dict, n: int = 10) -> dict:
 # ---------------------------------------------------------------------------
 # AI description generator
 # ---------------------------------------------------------------------------
+
 
 def _build_description_prompt(table: dict, profile: dict) -> str:
     """Build a prompt asking Claude to describe the table and each column."""
@@ -138,6 +136,7 @@ def _generate_descriptions(table: dict, profile: dict) -> dict:
 # ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
+
 
 def enrich_metadata(
     crawler: CatalogCrawler,

@@ -157,6 +157,8 @@ make test
 
 The project uses [Databricks Asset Bundles (DAB)](https://docs.databricks.com/dev-tools/bundles/index.html) to deploy jobs.
 
+**Key principle:** `sources.yml` is the single source of truth. Every source you add automatically gets its own Databricks job when you run `make bundle-deploy`.
+
 ### 1. Update `databricks.yml`
 
 Edit the `targets` section to match your workspace:
@@ -167,8 +169,6 @@ targets:
     workspace:
       profile: dev-azara          # must match a profile in ~/.databrickscfg
     variables:
-      catalog: "your_dev_catalog"
-      schema:  "your_dev_schema"
       serving_endpoint: "databricks-claude-opus-4-8"
 
   prod:
@@ -177,36 +177,46 @@ targets:
       profile: prod
       root_path: /Workspace/Shared/hackathon/agentic-datamodeling/prod
     variables:
-      catalog: "hackathon_demo"
-      schema:  "snapshot_global_realestate"
       serving_endpoint: "databricks-claude-opus-4-8"
 ```
 
-### 2. Validate the bundle
+### 2. Add your sources to `sources.yml`
+
+```bash
+cp sources.yml.example sources.yml
+# Edit sources.yml — add every database you want to discover
+```
+
+Each source gets its own Databricks job automatically. No manual job YAML needed.
+
+### 3. Validate the bundle
 
 ```bash
 make bundle-validate prod
 ```
 
-Fix any errors reported (usually misconfigured catalog/schema or missing endpoint).
-
-### 3. Deploy
+### 4. Deploy
 
 ```bash
 make bundle-deploy prod
 ```
 
-This builds the Python wheel, uploads it to the workspace, and creates/updates the Databricks jobs.
+`bundle-deploy` does three things in order:
+1. **`generate-jobs`** — reads `sources.yml`, writes `resources/source_jobs.yml` with one job per source
+2. **Build wheel** — packages the Python code
+3. **`bundle deploy`** — uploads the wheel and creates/updates all jobs in Databricks
 
-### 4. Run a job on Databricks
+### 5. Run a job on Databricks
+
+Job names follow the pattern `[{target}] Discover — {source_name}`:
 
 ```bash
-databricks bundle run catalog_discovery -t prod
-# or
-databricks bundle run agentic_datamodeling -t prod
+databricks bundle run discover_unity_prod -t prod
+databricks bundle run discover_erp_postgres -t prod
+# or any other source name from sources.yml
 ```
 
-Watch the job run in the Databricks UI under **Workflows**.
+Watch runs in the Databricks UI under **Workflows**.
 
 ### Bundle environments
 
@@ -312,8 +322,11 @@ This regenerates the `.sql`, `.erwin_notes.txt`, and `.er_diagram.md` files with
 
 ### Run via Databricks job
 
+Jobs are named after your `sources.yml` entries:
+
 ```bash
-databricks bundle run catalog_discovery -t prod
+databricks bundle run discover_unity_prod -t prod
+databricks bundle run discover_erp_postgres -t prod
 ```
 
 ---
@@ -490,25 +503,11 @@ CREATE SCHEMA IF NOT EXISTS hackathon_demo.snapshot_global_realestate;
 
 ## Adding New Sources
 
-### Option A: Command line (one-off)
+`sources.yml` is the single config file for all source databases. Adding an entry here does two things automatically:
+- Enables local discovery via the CLI (`discover`, `check-sources`)
+- Creates a dedicated Databricks job when you next run `make bundle-deploy`
 
-Pass `--source` and `--connection-string` directly:
-
-```bash
-discover --source postgresql --schema public \
-  --connection-string "postgresql+psycopg2://user:pass@host:5432/mydb"
-```
-
-### Option B: `sources.yml` (multi-source registry)
-
-Copy the example and fill in your values:
-
-```bash
-cp sources.yml.example sources.yml
-# Edit sources.yml — add your databases
-```
-
-`sources.yml` supports four source types:
+### Step 1 — Add the source to `sources.yml`
 
 ```yaml
 sources:
@@ -518,18 +517,20 @@ sources:
     catalog: prod_catalog
     schema: common_data_model
 
-  # PostgreSQL — credential via Databricks secret
+  # PostgreSQL with SSL
   - name: erp_postgres
     type: postgresql
     schema: public
+    sslmode: require             # optional — appended to connection string automatically
     secret_scope: adm
     secret_key: ERP_POSTGRES_CONNECTION_STRING
 
-  # SQL Server — credential via env var (local dev)
+  # SQL Server
   - name: crm_sqlserver
     type: sqlserver
     schema: dbo
-    # export ADM_CRM_SQLSERVER_CONNECTION_STRING=mssql+pyodbc://...
+    secret_scope: adm
+    secret_key: CRM_SQLSERVER_CONNECTION_STRING
 
   # Azure SQL
   - name: finance_azuresql
@@ -539,25 +540,71 @@ sources:
     secret_key: FINANCE_AZURESQL_CONNECTION_STRING
 ```
 
-Credential resolution order (first match wins):
-1. `connection_string` field in the YAML (dev only — never commit passwords)
-2. Databricks secret (`secret_scope` + `secret_key`)
-3. Environment variable `ADM_<secret_key>`
+### Step 2 — Store credentials as Databricks secrets
 
-Check connectivity for all registered sources:
+```bash
+# Create the secret scope once (skip if it already exists)
+databricks secrets create-scope adm --profile prod
+
+# Store the connection string
+databricks secrets put-secret adm ERP_POSTGRES_CONNECTION_STRING \
+  --string-value "postgresql+psycopg2://user:pass@host:5432/erp_db" \
+  --profile prod
+
+# Update an existing secret with a new value (same command — it's an upsert)
+databricks secrets put-secret adm ERP_POSTGRES_CONNECTION_STRING \
+  --string-value "postgresql+psycopg2://user:newpass@host:5432/erp_db" \
+  --profile prod
+```
+
+> **Local dev alternative:** set `ADM_<SECRET_KEY>` as an env var instead of a Databricks secret:
+> ```bash
+> export ADM_ERP_POSTGRES_CONNECTION_STRING="postgresql+psycopg2://user:pass@host:5432/erp_db"
+> ```
+
+### Step 3 — Check connectivity
 
 ```bash
 make check-sources prod
 ```
 
-Store a connection string as a Databricks secret:
+### Step 4 — Deploy (creates the Databricks job automatically)
 
 ```bash
-databricks secrets create-scope adm --profile prod
-databricks secrets put-secret adm ERP_POSTGRES_CONNECTION_STRING \
-  --string-value "postgresql+psycopg2://user:pass@host:5432/erp_db" \
-  --profile prod
+make bundle-deploy prod
 ```
+
+`generate-jobs` runs first, reads `sources.yml`, and writes `resources/source_jobs.yml` with one job per source. Then the bundle deploys everything.
+
+To preview what jobs would be generated without deploying:
+
+```bash
+make generate-jobs
+cat resources/source_jobs.yml
+```
+
+### Credential resolution order (first match wins)
+
+1. `connection_string` field in `sources.yml` — dev only, never commit passwords
+2. Databricks secret (`secret_scope` + `secret_key`) — recommended for prod
+3. Environment variable `ADM_<secret_key>` — local dev alternative to secrets
+
+### Connection string notes
+
+- Always use `postgresql+psycopg2://` (not `postgresql://` or `postgresql+asyncpg://`) — psycopg2 supports `sslmode` natively
+- For **SQL Server / Azure SQL**, use `mssql+pyodbc://` with `?driver=ODBC+Driver+17+for+SQL+Server`
+- Bare `postgresql://` and `postgresql+asyncpg://` are automatically rewritten to `postgresql+psycopg2://` by the connector
+
+### WSL2 / local PostgreSQL
+
+If PostgreSQL runs on your Windows laptop and your code runs in WSL2, `localhost` won't work. Use the Windows host IP instead:
+
+```bash
+WIN_HOST=$(cat /etc/resolv.conf | grep nameserver | awk '{print $2}')
+export ADM_ERP_POSTGRES_CONNECTION_STRING="postgresql+psycopg2://user:pass@${WIN_HOST}:5432/mydb"
+```
+
+Add to `~/.bashrc` to persist (the IP changes on each WSL restart).
 
 ---
 
@@ -637,9 +684,12 @@ agentic-datamodeling/
 ├── sources.yml.example                    ← multi-source config template
 ├── sources.yml                            ← your sources (git-ignored)
 │
+├── scripts/
+│   └── generate_source_jobs.py            ← generates resources/source_jobs.yml from sources.yml
+│
 ├── resources/
-│   ├── agentic_datamodeling.yml           ← main pipeline job resource
-│   └── catalog_discovery_job.yml         ← catalog discovery job resource
+│   ├── agentic_datamodeling.yml           ← main pipeline job (handcrafted — uses `main` entry point)
+│   └── source_jobs.yml                    ← AUTO-GENERATED from sources.yml — do not edit manually
 │
 └── src/
     └── adm/                               ← Python package
@@ -669,10 +719,11 @@ Run `make help` to see all commands with descriptions.
 
 | Command | Description |
 |---------|-------------|
+| `make generate-jobs` | Generate `resources/source_jobs.yml` from `sources.yml` (preview without deploying) |
 | `make bundle-validate dev` | Validate DAB config for `dev` target |
 | `make bundle-validate prod` | Validate DAB config for `prod` target |
-| `make bundle-deploy dev` | Build wheel + deploy jobs to `dev` |
-| `make bundle-deploy prod` | Build wheel + deploy jobs to `prod` |
+| `make bundle-deploy dev` | Generate jobs + build wheel + deploy to `dev` |
+| `make bundle-deploy prod` | Generate jobs + build wheel + deploy to `prod` |
 | `make bundle-destroy prod` | Remove bundle-managed jobs (**Model Serving endpoint is NOT affected**) |
 
 ### Source Connectivity
@@ -687,7 +738,7 @@ Run `make help` to see all commands with descriptions.
 | Command | Description |
 |---------|-------------|
 | `make install` | Install dev dependencies into the active Python environment |
-| `make lint` | Run pre-commit hooks (black, isort, flake8, pylint, mypy) |
+| `make lint` | Run pre-commit hooks (black, isort, flake8, mypy) |
 | `make test` | Run all unit tests |
 | `make test-quick` | Run tests excluding slow markers |
 | `make build` | Build the Python wheel |

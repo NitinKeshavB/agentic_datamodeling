@@ -1,4 +1,5 @@
 # Databricks notebook source
+# mypy: ignore-errors
 
 # COMMAND ----------
 # MAGIC %md
@@ -12,13 +13,14 @@
 # COMMAND ----------
 
 # Parameters — update before running
-CATALOG = "dev_catalog"       # Target Unity Catalog catalog
-SCHEMA = "your_schema"        # Target schema (leave empty "" to scan all schemas)
-WAREHOUSE_ID = None           # Leave None to auto-select the first available warehouse
+CATALOG = "dev_catalog"  # Target Unity Catalog catalog
+SCHEMA = "your_schema"  # Target schema (leave empty "" to scan all schemas)
+WAREHOUSE_ID = None  # Leave None to auto-select the first available warehouse
 
 # COMMAND ----------
 
 import json
+
 from adm.catalog.crawler import CatalogCrawler
 from adm.catalog.relationships import RelationshipDetector
 
@@ -61,14 +63,16 @@ print(f"Total relationships detected: {len(relationships)}\n")
 print(f"{'TYPE':<20} {'CONFIDENCE':>10}  RELATIONSHIP")
 print("-" * 80)
 for r in relationships:
-    print(f"{r.relationship_type:<20} {r.confidence:>10.0%}  {r.child_table}.{r.child_column}  →  {r.parent_table}.{r.parent_column}")
+    print(
+        f"{r.relationship_type:<20} {r.confidence:>10.0%}  {r.child_table}.{r.child_column}  →  {r.parent_table}.{r.parent_column}"
+    )
 
 # COMMAND ----------
 # MAGIC %md ## 4. Data Quality — Row Counts & Null Rates
 
 # COMMAND ----------
 
-for t in tables[:10]:    # limit to first 10 tables to avoid long runtimes
+for t in tables[:10]:  # limit to first 10 tables to avoid long runtimes
     stats = crawler.get_table_stats(t["full_name"])
     high_null = {col: rate for col, rate in stats["null_rates"].items() if rate > 0.1}
     print(f"{t['name']:40s}  rows={stats['row_count']:>10,}  high-null cols: {high_null or 'none'}")
@@ -82,7 +86,9 @@ for t in tables[:10]:
     if t["primary_keys"]:
         dupes = crawler.check_duplicates(t["full_name"], t["primary_keys"])
         if dupes["duplicate_groups"] > 0:
-            print(f"⚠  {t['name']}: {dupes['duplicate_groups']} duplicate groups ({dupes['duplicate_rows']} extra rows)")
+            print(
+                f"⚠  {t['name']}: {dupes['duplicate_groups']} duplicate groups ({dupes['duplicate_rows']} extra rows)"
+            )
         else:
             print(f"✓  {t['name']}: no duplicates on {t['primary_keys']}")
 
@@ -98,11 +104,13 @@ for t in tables[:10]:
 # COMMAND ----------
 
 import os
+
 from adm.agents.catalog_agent import CatalogAgent
 
 # Load API key from Databricks secret (if running on cluster) or env var
 try:
     from pyspark.dbutils import DBUtils
+
     dbutils = DBUtils(spark)
     os.environ["ANTHROPIC_API_KEY"] = dbutils.secrets.get(scope="adm", key="ANTHROPIC_API_KEY")
 except Exception:

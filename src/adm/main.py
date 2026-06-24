@@ -8,6 +8,14 @@ import re
 import sys
 
 _WORKSPACE_OUTPUT_ROOT = "/Workspace/Shared/hackathon/agentic-datamodeling/outputs"
+_LOCAL_OUTPUT_ROOT = "~/adm-outputs"
+
+
+def _is_databricks() -> bool:
+    """Return True when running inside a Databricks cluster or job."""
+    import os
+
+    return bool(os.environ.get("DATABRICKS_RUNTIME_VERSION"))
 
 
 def _parse_ai_analysis(raw: str | None) -> dict | str | None:
@@ -34,20 +42,21 @@ def _parse_ai_analysis(raw: str | None) -> dict | str | None:
 
 
 def _build_output_path(catalog: str, schema: str, base_path: str | None) -> str:
-    """Return a timestamped output path under the workspace outputs folder."""
-    from datetime import datetime
+    """Return a timestamped output path.
+
+    On Databricks: /Workspace/Shared/.../YYYY-MM-DD/HH-MM-SS/
+    Locally:       ~/adm-outputs/YYYY-MM-DD/HH-MM-SS/
+    """
     import os
+    from datetime import datetime
 
     if base_path:
         os.makedirs(os.path.dirname(base_path) or ".", exist_ok=True)
         return base_path
 
+    root = _WORKSPACE_OUTPUT_ROOT if _is_databricks() else os.path.expanduser(_LOCAL_OUTPUT_ROOT)
     ts = datetime.now()
-    folder = os.path.join(
-        _WORKSPACE_OUTPUT_ROOT,
-        ts.strftime("%Y-%m-%d"),
-        ts.strftime("%H-%M-%S"),
-    )
+    folder = os.path.join(root, ts.strftime("%Y-%m-%d"), ts.strftime("%H-%M-%S"))
     os.makedirs(folder, exist_ok=True)
     return os.path.join(folder, f"catalog_discovery_{catalog}_{schema}.json")
 
@@ -55,9 +64,10 @@ def _build_output_path(catalog: str, schema: str, base_path: str | None) -> str:
 def _discover(args: argparse.Namespace) -> None:
     """Crawl a source database, detect relationships, and run AI data model analysis."""
     import os
+
+    from adm.agents.catalog_agent import CatalogAgent
     from adm.catalog.crawler import CatalogCrawler
     from adm.catalog.relationships import RelationshipDetector
-    from adm.agents.catalog_agent import CatalogAgent
 
     # ------------------------------------------------------------------
     # Build the crawler from source type + connection args
@@ -76,16 +86,14 @@ def _discover(args: argparse.Namespace) -> None:
         conn_str = args.connection_string or os.environ.get("ADM_CONNECTION_STRING")
         if not conn_str:
             raise SystemExit(
-                "--connection-string (or ADM_CONNECTION_STRING env var) is required "
-                f"for source '{source_type}'."
+                "--connection-string (or ADM_CONNECTION_STRING env var) is required " f"for source '{source_type}'."
             )
         if not args.schema:
             raise SystemExit(f"--schema is required for source '{source_type}'.")
         crawler = CatalogCrawler.from_jdbc(source_type, conn_str, args.schema)
     else:
         raise SystemExit(
-            f"Unknown --source '{args.source}'. "
-            "Supported: unity_catalog, postgresql, sqlserver, azuresql"
+            f"Unknown --source '{args.source}'. " "Supported: unity_catalog, postgresql, sqlserver, azuresql"
         )
 
     # ------------------------------------------------------------------
@@ -155,6 +163,7 @@ def _discover(args: argparse.Namespace) -> None:
 
     # Auto-generate DDL + Mermaid ER diagram alongside the JSON
     from adm.ddl.generator import generate_from_file
+
     sql_path, notes_path, mermaid_path = generate_from_file(report_path=output_path)
     print(f"DDL written to       : {sql_path}")
     print(f"ERwin notes written  : {notes_path}")
@@ -266,14 +275,15 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     # Unity Catalog args
     discover_p.add_argument("--catalog", default=None, help="Catalog name (unity_catalog only)")
-    discover_p.add_argument("--warehouse-id", default=None, dest="warehouse_id", help="SQL Warehouse ID (unity_catalog only)")
+    discover_p.add_argument(
+        "--warehouse-id", default=None, dest="warehouse_id", help="SQL Warehouse ID (unity_catalog only)"
+    )
     # JDBC args
     discover_p.add_argument(
         "--connection-string",
         default=None,
         dest="connection_string",
-        help="SQLAlchemy connection string for JDBC sources. "
-             "Can also be set via ADM_CONNECTION_STRING env var.",
+        help="SQLAlchemy connection string for JDBC sources. " "Can also be set via ADM_CONNECTION_STRING env var.",
     )
     # Common
     discover_p.add_argument("--schema", default=None, help="Schema / namespace to crawl")
