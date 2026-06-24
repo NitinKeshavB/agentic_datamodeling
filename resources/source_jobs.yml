@@ -3,8 +3,8 @@
 
 resources:
   jobs:
-    discover_unity_prod:
-      name: '[${bundle.target}] Discover — unity_prod'
+    discover_unity_catalog:
+      name: '[${bundle.target}] Discover — unity_catalog'
       description: Production Unity Catalog — curated common data model
       tasks:
       - task_key: discover
@@ -18,14 +18,15 @@ resources:
           - hackathon_demo
           - --schema
           - snapshot_global_realestate
+        job_cluster_key: adm_cluster
         libraries:
-        - whl: ${workspace.file_path}/.internal/*.whl
-        environment_key: serverless
-      environments:
-      - environment_key: serverless
-        spec:
-          client: '1'
-      job_clusters: []
+        - whl: /Workspace/Shared/hackathon/${bundle.name}/${bundle.target}/artifacts/.internal/agentic_datamodeling-0.0.0-py3-none-any.whl
+      job_clusters:
+      - job_cluster_key: adm_cluster
+        new_cluster:
+          spark_version: 15.4.x-scala2.12
+          node_type_id: Standard_D4ds_v5
+          num_workers: 2
       permissions:
       - level: CAN_VIEW
         group_name: datamodeling_hackathon
@@ -44,14 +45,15 @@ resources:
           - public
           - --connection-string
           - '{{secrets/adm/ERP_POSTGRES_CONNECTION_STRING}}'
+        job_cluster_key: adm_cluster
         libraries:
-        - whl: ${workspace.file_path}/.internal/*.whl
-        environment_key: serverless
-      environments:
-      - environment_key: serverless
-        spec:
-          client: '1'
-      job_clusters: []
+        - whl: /Workspace/Shared/hackathon/${bundle.name}/${bundle.target}/artifacts/.internal/agentic_datamodeling-0.0.0-py3-none-any.whl
+      job_clusters:
+      - job_cluster_key: adm_cluster
+        new_cluster:
+          spark_version: 15.4.x-scala2.12
+          node_type_id: Standard_D4ds_v5
+          num_workers: 2
       permissions:
       - level: CAN_VIEW
         group_name: datamodeling_hackathon

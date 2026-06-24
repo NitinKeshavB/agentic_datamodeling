@@ -8,6 +8,10 @@ artifacts:
   agentic_datamodeling:
     type: whl
     path: .
+    build: python -m build --wheel
+
+workspace:
+  root_path: /Workspace/Shared/hackathon/${bundle.name}/${bundle.target}
 
 variables:
   catalog:

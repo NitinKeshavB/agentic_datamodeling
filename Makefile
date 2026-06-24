@@ -61,7 +61,7 @@ clean: ## Remove build artifacts
 install: ## Install dev dependencies into the active Python environment
 	bash run.sh install
 
-lint: ## Run pre-commit linting checks (black, isort, flake8, pylint, mypy)
+lint: ## Run pre-commit linting checks (black, isort, flake8, mypy)
 	bash run.sh lint
 
 lint-ci: ## Run linting in CI mode (no auto-fix)

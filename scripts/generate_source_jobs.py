@@ -10,6 +10,7 @@ Usage:
 
 from __future__ import annotations
 
+import copy
 from pathlib import Path
 
 import yaml
@@ -17,6 +18,22 @@ import yaml
 ROOT = Path(__file__).parent.parent
 SOURCES_YML = ROOT / "sources.yml"
 OUTPUT_YML = ROOT / "resources" / "source_jobs.yml"
+
+# Read version from version.txt so the wheel filename stays in sync
+_raw_version = (ROOT / "version.txt").read_text().strip().lstrip("v")
+WHL_FILENAME = f"agentic_datamodeling-{_raw_version}-py3-none-any.whl"
+WHL_PATH = f"/Workspace/Shared/hackathon/${{bundle.name}}/${{bundle.target}}/artifacts/.internal/{WHL_FILENAME}"
+
+# Job cluster config — single-node, cost-efficient for data modeling workloads
+JOB_CLUSTER_KEY = "adm_cluster"
+JOB_CLUSTER = {
+    "job_cluster_key": JOB_CLUSTER_KEY,
+    "new_cluster": {
+        "spark_version": "15.4.x-scala2.12",
+        "node_type_id": "Standard_D4ds_v5",
+        "num_workers": 2,
+    },
+}
 
 
 def _job_key(name: str) -> str:
@@ -65,17 +82,17 @@ def _build_job(source: dict) -> dict:
                     "entry_point": "discover",
                     "parameters": _build_params(source),
                 },
-                "libraries": [{"whl": "${workspace.file_path}/.internal/*.whl"}],
-                "environment_key": "serverless",
+                "job_cluster_key": JOB_CLUSTER_KEY,
+                "libraries": [{"whl": WHL_PATH}],
             }
         ],
-        "environments": [{"environment_key": "serverless", "spec": {"client": "1"}}],
-        "job_clusters": [],
+        "job_clusters": [copy.deepcopy(JOB_CLUSTER)],
         "permissions": [{"level": "CAN_VIEW", "group_name": "datamodeling_hackathon"}],
     }
 
 
 def main() -> None:
+    """Generate resources/source_jobs.yml from sources.yml."""
     if not SOURCES_YML.exists():
         print("sources.yml not found — skipping job generation.")
         if OUTPUT_YML.exists():
