@@ -24,6 +24,12 @@ resources:
           - hackathon_demo
           - --schema
           - snapshot_global_realestate
+          - --databricks-host
+          - '{{secrets/adm/DATABRICKS_HOST}}'
+          - --databricks-token
+          - '{{secrets/adm/DATABRICKS_TOKEN}}'
+          - --serving-endpoint
+          - '{{secrets/adm/SERVING_ENDPOINT}}'
         environment_key: adm_env
       permissions:
       - level: CAN_VIEW
@@ -49,6 +55,12 @@ resources:
           - public
           - --connection-string
           - '{{secrets/adm/ERP_POSTGRES_CONNECTION_STRING}}'
+          - --databricks-host
+          - '{{secrets/adm/DATABRICKS_HOST}}'
+          - --databricks-token
+          - '{{secrets/adm/DATABRICKS_TOKEN}}'
+          - --serving-endpoint
+          - '{{secrets/adm/SERVING_ENDPOINT}}'
         environment_key: adm_env
       permissions:
       - level: CAN_VIEW

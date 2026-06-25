@@ -111,6 +111,21 @@ def _generate_descriptions(table: dict, profile: dict) -> dict:
     token = os.environ.get("DATABRICKS_TOKEN", "")
     endpoint = os.environ.get("SERVING_ENDPOINT", "databricks-claude-opus-4-8")
 
+    # Fall back to SDK auth — covers PAT, M2M OAuth, and ~/.databrickscfg profiles
+    if not host or not token:
+        try:
+            from databricks.sdk import WorkspaceClient
+
+            w = WorkspaceClient()
+            host = host or (w.config.host or "").rstrip("/")
+            if not token:
+                # w.config.token is None for M2M OAuth; get a live bearer token instead
+                auth_headers = w.config.authenticate()
+                bearer = auth_headers.get("Authorization", "")
+                token = bearer.removeprefix("Bearer ")
+        except Exception:
+            pass
+
     if not host or not token:
         return {"table_description": None, "column_descriptions": {}}
 

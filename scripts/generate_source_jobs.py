@@ -60,6 +60,26 @@ def _build_params(source: dict) -> list[str]:
     return params
 
 
+SECRET_SCOPE = "adm"
+
+
+def _llm_params() -> list[str]:
+    """Return LLM credential CLI args pointing at the adm secret scope.
+
+    python_wheel_task parameters do NOT get automatic secret substitution —
+    _resolve_secret_ref() in main.py unpacks them at run time.
+    """
+    s = SECRET_SCOPE
+    return [
+        "--databricks-host",
+        f"{{{{secrets/{s}/DATABRICKS_HOST}}}}",
+        "--databricks-token",
+        f"{{{{secrets/{s}/DATABRICKS_TOKEN}}}}",
+        "--serving-endpoint",
+        f"{{{{secrets/{s}/SERVING_ENDPOINT}}}}",
+    ]
+
+
 def _build_job(source: dict) -> dict:
     name = source["name"]
     stype = source["type"]
@@ -85,7 +105,7 @@ def _build_job(source: dict) -> dict:
                 "python_wheel_task": {
                     "package_name": "agentic-datamodeling",
                     "entry_point": "discover",
-                    "parameters": _build_params(source),
+                    "parameters": _build_params(source) + _llm_params(),
                 },
                 "environment_key": ENV_KEY,
             }

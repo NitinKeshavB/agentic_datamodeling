@@ -61,6 +61,33 @@ def _build_output_path(catalog: str, schema: str, base_path: str | None) -> str:
     return os.path.join(folder, f"catalog_discovery_{catalog}_{schema}.json")
 
 
+def _has_llm_access() -> bool:
+    """Return True if Databricks credentials are available via any mechanism.
+
+    Checks env vars first, then falls back to SDK config resolution so that
+    ~/.databrickscfg profiles (DATABRICKS_CONFIG_PROFILE) work locally without
+    requiring DATABRICKS_HOST / DATABRICKS_TOKEN to be exported explicitly.
+
+    On Databricks serverless jobs, auth is M2M OAuth so w.config.token is None —
+    we verify by issuing a live auth header instead.
+    """
+    import os
+
+    if os.environ.get("DATABRICKS_TOKEN") and os.environ.get("DATABRICKS_HOST"):
+        return True
+    try:
+        from databricks.sdk import WorkspaceClient
+
+        w = WorkspaceClient()
+        if not w.config.host:
+            return False
+        # w.config.token is None for M2M OAuth — verify by getting a live auth header
+        headers = w.config.authenticate()
+        return bool(headers.get("Authorization"))
+    except Exception:
+        return False
+
+
 def _resolve_secret_ref(ref: str) -> str:
     """Resolve a {{secrets/scope/key}} string via the Databricks SDK.
 
@@ -81,6 +108,8 @@ def _resolve_secret_ref(ref: str) -> str:
 
         w = WorkspaceClient()
         response = w.secrets.get_secret(scope=scope, key=key)
+        if not response.value:
+            raise ValueError(f"Secret '{scope}/{key}' is empty.")
         return base64.b64decode(response.value).decode("utf-8")
     except Exception as exc:
         raise SystemExit(
@@ -97,6 +126,17 @@ def _discover(args: argparse.Namespace) -> None:
     from adm.agents.catalog_agent import CatalogAgent
     from adm.catalog.crawler import CatalogCrawler
     from adm.catalog.relationships import RelationshipDetector
+
+    # ------------------------------------------------------------------
+    # Resolve and inject LLM credentials from CLI args / secrets
+    # ------------------------------------------------------------------
+    if args.databricks_host:
+        host = _resolve_secret_ref(args.databricks_host).rstrip("/")
+        os.environ["DATABRICKS_HOST"] = host
+    if args.databricks_token:
+        os.environ["DATABRICKS_TOKEN"] = _resolve_secret_ref(args.databricks_token)
+    if args.serving_endpoint:
+        os.environ["SERVING_ENDPOINT"] = _resolve_secret_ref(args.serving_endpoint)
 
     # ------------------------------------------------------------------
     # Build the crawler from source type + connection args
@@ -147,7 +187,7 @@ def _discover(args: argparse.Namespace) -> None:
     # ------------------------------------------------------------------
     from adm.catalog.profiler import enrich_metadata
 
-    has_llm = bool(os.environ.get("DATABRICKS_TOKEN") and os.environ.get("DATABRICKS_HOST"))
+    has_llm = _has_llm_access()
     print("\nProfiling tables (10 rows each) ...")
     metadata = enrich_metadata(
         crawler=crawler,
@@ -326,6 +366,25 @@ def _build_parser() -> argparse.ArgumentParser:
             "Path to write JSON output. Defaults to a timestamped folder under "
             f"{_WORKSPACE_OUTPUT_ROOT}/YYYY-MM-DD/HH-MM-SS/"
         ),
+    )
+    # LLM credentials — accept literal values or {{secrets/scope/key}} refs
+    discover_p.add_argument(
+        "--databricks-host",
+        default=None,
+        dest="databricks_host",
+        help="Databricks workspace URL. Accepts {{secrets/scope/key}} syntax.",
+    )
+    discover_p.add_argument(
+        "--databricks-token",
+        default=None,
+        dest="databricks_token",
+        help="Databricks PAT. Accepts {{secrets/scope/key}} syntax.",
+    )
+    discover_p.add_argument(
+        "--serving-endpoint",
+        default=None,
+        dest="serving_endpoint",
+        help="Model serving endpoint name (default: databricks-claude-opus-4-8).",
     )
     discover_p.set_defaults(func=_discover)
 

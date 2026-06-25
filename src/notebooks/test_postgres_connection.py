@@ -10,15 +10,14 @@
 # COMMAND ----------
 
 # DBTITLE 1, Configuration — fill these in or use a secret reference
-import os
 
 # Option A: hardcode for a quick test (never commit passwords)
-HOST     = "10.255.255.254"   # or your Azure Postgres host
-PORT     = 5432
+HOST = "10.255.255.254"  # or your Azure Postgres host
+PORT = 5432
 DATABASE = "postgres"
-USER     = "postgres"
+USER = "postgres"
 # PASSWORD read from Databricks secret so it never appears in plaintext
-PASSWORD = dbutils.secrets.get(scope="adm", key="ERP_POSTGRES_CONNECTION_STRING")  # noqa
+PASSWORD = dbutils.secrets.get(scope="adm", key="ERP_POSTGRES_CONNECTION_STRING")  # type: ignore[name-defined]
 
 # Option B: paste a full SQLAlchemy URL directly
 # CONN_URL = "postgresql+psycopg2://user:pass@host:5432/dbname"
@@ -38,8 +37,11 @@ import psycopg2
 
 try:
     conn = psycopg2.connect(
-        host=HOST, port=PORT, dbname=DATABASE,
-        user=USER, password=PASSWORD,
+        host=HOST,
+        port=PORT,
+        dbname=DATABASE,
+        user=USER,
+        password=PASSWORD,
         connect_timeout=5,
     )
     cur = conn.cursor()
@@ -53,14 +55,17 @@ except Exception as e:
 # COMMAND ----------
 
 # DBTITLE 1, Test 2 — SQLAlchemy engine ping
-from sqlalchemy import create_engine, text
+from sqlalchemy import (
+    create_engine,
+    text,
+)
 
 try:
     engine = create_engine(CONN_URL, connect_args={"connect_timeout": 5})
     with engine.connect() as conn:
         result = conn.execute(text("SELECT current_database(), current_user, inet_server_addr(), inet_server_port()"))
         row = result.fetchone()
-        print(f"✓ SQLAlchemy connected")
+        print("✓ SQLAlchemy connected")
         print(f"  database : {row[0]}")
         print(f"  user     : {row[1]}")
         print(f"  server   : {row[2]}:{row[3]}")

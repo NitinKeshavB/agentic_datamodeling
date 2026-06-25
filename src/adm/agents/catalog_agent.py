@@ -159,6 +159,29 @@ class CatalogAgent:
 
         host = os.environ.get("DATABRICKS_HOST", "").rstrip("/")
         token = os.environ.get("DATABRICKS_TOKEN", "")
+
+        # Fall back to SDK auth (covers ~/.databrickscfg and M2M OAuth)
+        if not host or not token:
+            try:
+                from databricks.sdk import WorkspaceClient
+
+                w = WorkspaceClient()
+                host = host or (w.config.host or "").rstrip("/")
+                if not token:
+                    bearer = w.config.authenticate().get("Authorization", "")
+                    token = bearer.removeprefix("Bearer ")
+            except Exception:
+                pass
+
+        if not host or not token:
+            raise RuntimeError(
+                "Databricks credentials not found.\n"
+                "On Databricks jobs: ensure secrets/adm/DATABRICKS_HOST and "
+                "secrets/adm/DATABRICKS_TOKEN exist and the bundle is redeployed.\n"
+                "Locally: set DATABRICKS_HOST and DATABRICKS_TOKEN env vars, "
+                "or configure ~/.databrickscfg."
+            )
+
         self.client = OpenAI(
             api_key=token,
             base_url=f"{host}/serving-endpoints",

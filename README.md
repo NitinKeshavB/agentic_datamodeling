@@ -77,7 +77,7 @@ All AI calls go through a **Databricks Model Serving endpoint** — no outbound 
 
 | Tool | Required version | Notes |
 |------|-----------------|-------|
-| Python | ≥ 3.12 | [pyenv](https://github.com/pyenv/pyenv) recommended |
+| Python | ≥ 3.10 | [pyenv](https://github.com/pyenv/pyenv) recommended; 3.12 used for local dev |
 | Databricks CLI | ≥ 0.200 | `pip install databricks-cli` |
 | `uv` (optional) | latest | `pip install uv` — faster installs |
 | `make` | any | `sudo apt-get install make` (Linux/WSL) |
@@ -108,7 +108,7 @@ For SQL Server support: `pip install -e ".[dev,sqlserver]"`
 Create or edit `~/.databrickscfg` with a named profile per environment:
 
 ```ini
-[dev-azara]
+[dev]
 host  = https://adb-<dev-workspace-id>.azuredatabricks.net
 token = dapi...
 
@@ -591,9 +591,28 @@ cat resources/source_jobs.yml
 
 ### Connection string notes
 
-- Always use `postgresql+psycopg2://` (not `postgresql://` or `postgresql+asyncpg://`) — psycopg2 supports `sslmode` natively
-- For **SQL Server / Azure SQL**, use `mssql+pyodbc://` with `?driver=ODBC+Driver+17+for+SQL+Server`
-- Bare `postgresql://` and `postgresql+asyncpg://` are automatically rewritten to `postgresql+psycopg2://` by the connector
+The connector automatically normalises common URL variants — you don't need to pick the exact dialect manually:
+
+| Input format | Normalised to |
+|---|---|
+| `postgres://` | `postgresql+psycopg2://` |
+| `postgresql://` | `postgresql+psycopg2://` |
+| `postgresql+asyncpg://` | `postgresql+psycopg2://` |
+| `jdbc:postgresql://` | `postgresql+psycopg2://` |
+| `mssql://` | `mssql+pyodbc://` |
+| `jdbc:sqlserver://` | `mssql+pyodbc://` |
+
+For **SQL Server / Azure SQL**, append `?driver=ODBC+Driver+17+for+SQL+Server` to the connection string.
+
+### Secrets in Databricks jobs
+
+`{{secrets/scope/key}}` in `python_wheel_task` parameters is **not resolved** by Databricks (only notebook/SQL tasks resolve secrets this way). The connector detects the unresolved reference pattern and reads the secret directly via the Databricks SDK instead — no change needed in `sources.yml`.
+
+Prerequisite: the job's running principal must have at least `READ` on the secret scope:
+
+```bash
+databricks secrets put-acl adm datamodeling_hackathon READ --profile prod
+```
 
 ### WSL2 / local PostgreSQL
 
@@ -609,6 +628,46 @@ Add to `~/.bashrc` to persist (the IP changes on each WSL restart).
 ---
 
 ## Troubleshooting
+
+### `ERROR_UNSUPPORTED_PYTHON_VERSION` on job run
+
+The wheel requires Python ≥ 3.10. Databricks serverless runs Python 3.10. If you see this error it means the `requires-python` constraint in the wheel is stricter than the runtime. Check `version.txt` and rebuild:
+
+```bash
+make build
+make bundle-deploy prod
+```
+
+If the old wheel is cached (same filename), bump the version in `version.txt` (e.g. `0.0.2` → `0.0.3`) before rebuilding to force a fresh environment install.
+
+### `SystemExit: The connection string is an unresolved Databricks secret reference`
+
+The Databricks secret scope or key doesn't exist, or the job principal lacks READ permission.
+
+```bash
+# Verify the secret exists
+databricks secrets list-secrets adm --profile prod
+
+# Grant READ to the job's group
+databricks secrets put-acl adm datamodeling_hackathon READ --profile prod
+```
+
+### `OperationalError: Connection timed out` to Azure PostgreSQL
+
+The Databricks serverless compute cannot reach the database. This is a network/firewall issue:
+
+- **Azure PostgreSQL**: go to Azure Portal → PostgreSQL server → Networking → add a firewall rule for the Databricks workspace egress IPs, or enable **Allow public access from Azure services**.
+- **Private endpoint only**: the server is not publicly reachable; use Azure Private Link or VNet peering between Databricks and the PostgreSQL VNet.
+
+To diagnose from a Databricks notebook:
+
+```python
+import subprocess
+r = subprocess.run(["nc", "-zv", "-w", "3", "<host>", "5432"], capture_output=True, text=True)
+print(r.stderr)
+# "Connection refused" → reachable but blocked at PostgreSQL level
+# "timed out"         → not reachable at all (firewall / private endpoint)
+```
 
 ### `ModuleNotFoundError: No module named 'openai'`
 
