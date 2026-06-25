@@ -61,6 +61,35 @@ def _build_output_path(catalog: str, schema: str, base_path: str | None) -> str:
     return os.path.join(folder, f"catalog_discovery_{catalog}_{schema}.json")
 
 
+def _resolve_secret_ref(ref: str) -> str:
+    """Resolve a {{secrets/scope/key}} string via the Databricks SDK.
+
+    python_wheel_task parameters do not undergo Databricks secret substitution
+    (only notebook/SQL tasks do), so the literal reference arrives here and we
+    resolve it ourselves using the SDK — which is already a core dependency.
+    """
+    import base64
+    import re
+
+    m = re.match(r"^\{\{secrets/([^/]+)/([^}]+)\}\}$", ref)
+    if not m:
+        return ref
+
+    scope, key = m.group(1), m.group(2)
+    try:
+        from databricks.sdk import WorkspaceClient
+
+        w = WorkspaceClient()
+        response = w.secrets.get_secret(scope=scope, key=key)
+        return base64.b64decode(response.value).decode("utf-8")
+    except Exception as exc:
+        raise SystemExit(
+            f"Failed to read Databricks secret '{{{{secrets/{scope}/{key}}}}}'.\n"
+            f"Ensure the job principal has READ on scope '{scope}'.\n"
+            f"Error: {exc}"
+        ) from exc
+
+
 def _discover(args: argparse.Namespace) -> None:
     """Crawl a source database, detect relationships, and run AI data model analysis."""
     import os
@@ -88,6 +117,8 @@ def _discover(args: argparse.Namespace) -> None:
             raise SystemExit(
                 "--connection-string (or ADM_CONNECTION_STRING env var) is required " f"for source '{source_type}'."
             )
+        if conn_str.startswith("{{secrets/"):
+            conn_str = _resolve_secret_ref(conn_str)
         if not args.schema:
             raise SystemExit(f"--schema is required for source '{source_type}'.")
         crawler = CatalogCrawler.from_jdbc(source_type, conn_str, args.schema)

@@ -10,7 +10,6 @@ Usage:
 
 from __future__ import annotations
 
-import copy
 from pathlib import Path
 
 import yaml
@@ -22,18 +21,12 @@ OUTPUT_YML = ROOT / "resources" / "source_jobs.yml"
 # Read version from version.txt so the wheel filename stays in sync
 _raw_version = (ROOT / "version.txt").read_text().strip().lstrip("v")
 WHL_FILENAME = f"agentic_datamodeling-{_raw_version}-py3-none-any.whl"
-WHL_PATH = f"/Workspace/Shared/hackathon/${{bundle.name}}/${{bundle.target}}/artifacts/.internal/{WHL_FILENAME}"
+# ${workspace.root_path} resolves to the bundle root (e.g. /Workspace/Shared/hackathon/…/prod).
+# Artifacts are always uploaded to root_path/artifacts/.internal/ — NOT root_path/files/.internal/
+WHL_PATH = f"${{workspace.root_path}}/artifacts/.internal/{WHL_FILENAME}"
 
-# Job cluster config — single-node, cost-efficient for data modeling workloads
-JOB_CLUSTER_KEY = "adm_cluster"
-JOB_CLUSTER = {
-    "job_cluster_key": JOB_CLUSTER_KEY,
-    "new_cluster": {
-        "spark_version": "15.4.x-scala2.12",
-        "node_type_id": "Standard_D4ds_v5",
-        "num_workers": 2,
-    },
-}
+# Serverless environment key — used by all tasks in every generated job
+ENV_KEY = "adm_env"
 
 
 def _job_key(name: str) -> str:
@@ -52,14 +45,15 @@ def _build_params(source: dict) -> list[str]:
         if source.get("warehouse_id"):
             params += ["--warehouse-id", source["warehouse_id"]]
     else:
-        # JDBC: postgresql / sqlserver / azuresql
+        # JDBC: schema + connection string.
+        # Databricks resolves {{secrets/scope/key}} in python_wheel_task.parameters
+        # at job-run time — the secret scope/key must exist before running the job.
         if source.get("schema"):
             params += ["--schema", source["schema"]]
-
         if source.get("secret_scope") and source.get("secret_key"):
-            # Resolved at job-run time via Databricks secret reference
-            conn_str = f"{{{{secrets/{source['secret_scope']}/{source['secret_key']}}}}}"
-            params += ["--connection-string", conn_str]
+            scope = source["secret_scope"]
+            key = source["secret_key"]
+            params += ["--connection-string", f"{{{{secrets/{scope}/{key}}}}}"]
         elif source.get("connection_string"):
             params += ["--connection-string", source["connection_string"]]
 
@@ -74,6 +68,17 @@ def _build_job(source: dict) -> dict:
     return {
         "name": f"[${{bundle.target}}] Discover — {name}",
         "description": desc,
+        # Serverless: wheel goes in environments.spec.dependencies, not task libraries.
+        # Tasks reference the environment via environment_key; no job_cluster_key needed.
+        "environments": [
+            {
+                "environment_key": ENV_KEY,
+                "spec": {
+                    "client": "1",
+                    "dependencies": [WHL_PATH],
+                },
+            }
+        ],
         "tasks": [
             {
                 "task_key": "discover",
@@ -82,11 +87,9 @@ def _build_job(source: dict) -> dict:
                     "entry_point": "discover",
                     "parameters": _build_params(source),
                 },
-                "job_cluster_key": JOB_CLUSTER_KEY,
-                "libraries": [{"whl": WHL_PATH}],
+                "environment_key": ENV_KEY,
             }
         ],
-        "job_clusters": [copy.deepcopy(JOB_CLUSTER)],
         "permissions": [{"level": "CAN_VIEW", "group_name": "datamodeling_hackathon"}],
     }
 

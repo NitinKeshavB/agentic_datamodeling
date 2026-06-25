@@ -6,6 +6,12 @@ resources:
     discover_unity_catalog:
       name: '[${bundle.target}] Discover — unity_catalog'
       description: Production Unity Catalog — curated common data model
+      environments:
+      - environment_key: adm_env
+        spec:
+          client: '1'
+          dependencies:
+          - ${workspace.root_path}/artifacts/.internal/agentic_datamodeling-0.0.2-py3-none-any.whl
       tasks:
       - task_key: discover
         python_wheel_task:
@@ -18,21 +24,19 @@ resources:
           - hackathon_demo
           - --schema
           - snapshot_global_realestate
-        job_cluster_key: adm_cluster
-        libraries:
-        - whl: /Workspace/Shared/hackathon/${bundle.name}/${bundle.target}/artifacts/.internal/agentic_datamodeling-0.0.0-py3-none-any.whl
-      job_clusters:
-      - job_cluster_key: adm_cluster
-        new_cluster:
-          spark_version: 15.4.x-scala2.12
-          node_type_id: Standard_D4ds_v5
-          num_workers: 2
+        environment_key: adm_env
       permissions:
       - level: CAN_VIEW
         group_name: datamodeling_hackathon
     discover_erp_postgres:
       name: '[${bundle.target}] Discover — erp_postgres'
       description: ERP source database (PostgreSQL)
+      environments:
+      - environment_key: adm_env
+        spec:
+          client: '1'
+          dependencies:
+          - ${workspace.root_path}/artifacts/.internal/agentic_datamodeling-0.0.2-py3-none-any.whl
       tasks:
       - task_key: discover
         python_wheel_task:
@@ -45,15 +49,7 @@ resources:
           - public
           - --connection-string
           - '{{secrets/adm/ERP_POSTGRES_CONNECTION_STRING}}'
-        job_cluster_key: adm_cluster
-        libraries:
-        - whl: /Workspace/Shared/hackathon/${bundle.name}/${bundle.target}/artifacts/.internal/agentic_datamodeling-0.0.0-py3-none-any.whl
-      job_clusters:
-      - job_cluster_key: adm_cluster
-        new_cluster:
-          spark_version: 15.4.x-scala2.12
-          node_type_id: Standard_D4ds_v5
-          num_workers: 2
+        environment_key: adm_env
       permissions:
       - level: CAN_VIEW
         group_name: datamodeling_hackathon

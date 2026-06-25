@@ -7,7 +7,7 @@ name = "agentic-datamodeling"
 description = "agentic data model generator"
 authors = [{ name = "data modeling expedition team", email = "nitinkeshav.bolla@jll.com"}]
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.10"
 license = { text = "MIT" }
 dependencies = ["databricks-sdk>=0.20.0", "openai>=1.0.0", "sqlalchemy>=2.0.0", "pyyaml>=6.0"]
 classifiers = ["Programming Language :: Python :: 3"]

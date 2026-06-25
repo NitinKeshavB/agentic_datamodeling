@@ -36,25 +36,50 @@ class JDBCConnector(SourceConnector):
         self._schema = schema
         self._source_type = source_type.lower()
         self._connection_string = self._normalise(connection_string, source_type)
-        self.engine: Engine = create_engine(self._connection_string, future=True)
+        try:
+            self.engine: Engine = create_engine(self._connection_string, future=True)
+        except Exception as exc:
+            scheme = (
+                self._connection_string.split("://")[0]
+                if "://" in self._connection_string
+                else repr(self._connection_string[:40])
+            )
+            raise ValueError(
+                f"Could not create SQLAlchemy engine for source_type='{source_type}'. "
+                f"URL scheme parsed as '{scheme}'. "
+                "Expected formats: postgresql+psycopg2://user:pass@host:5432/dbname  "
+                "or mssql+pyodbc://user:pass@host:1433/dbname?driver=ODBC+Driver+17+for+SQL+Server"
+            ) from exc
         self._catalog_name = self._parse_database_name(self._connection_string)
 
     @staticmethod
     def _normalise(conn_str: str, source_type: str) -> str:
         """Pin the SQLAlchemy dialect driver so sslmode and other params work correctly.
 
+        postgres://            → postgresql+psycopg2://  (short-form used by many providers)
         postgresql://          → postgresql+psycopg2://  (asyncpg rejects sslmode)
         postgresql+asyncpg://  → postgresql+psycopg2://  (same reason)
+        jdbc:postgresql://     → postgresql+psycopg2://  (JDBC-style URLs)
         mssql://               → mssql+pyodbc://
+        jdbc:sqlserver://      → mssql+pyodbc://
         """
         st = source_type.lower()
-        if st in ("postgresql",):
-            if conn_str.startswith("postgresql://"):
-                return conn_str.replace("postgresql://", "postgresql+psycopg2://", 1)
-            if conn_str.startswith("postgresql+asyncpg://"):
-                return conn_str.replace("postgresql+asyncpg://", "postgresql+psycopg2://", 1)
-        if st in ("sqlserver", "azuresql") and conn_str.startswith("mssql://"):
-            return conn_str.replace("mssql://", "mssql+pyodbc://", 1)
+        if st == "postgresql":
+            for prefix, replacement in (
+                ("jdbc:postgresql://", "postgresql+psycopg2://"),
+                ("postgresql+asyncpg://", "postgresql+psycopg2://"),
+                ("postgresql://", "postgresql+psycopg2://"),
+                ("postgres://", "postgresql+psycopg2://"),
+            ):
+                if conn_str.startswith(prefix):
+                    return conn_str.replace(prefix, replacement, 1)
+        if st in ("sqlserver", "azuresql"):
+            for prefix, replacement in (
+                ("jdbc:sqlserver://", "mssql+pyodbc://"),
+                ("mssql://", "mssql+pyodbc://"),
+            ):
+                if conn_str.startswith(prefix):
+                    return conn_str.replace(prefix, replacement, 1)
         return conn_str
 
     # ------------------------------------------------------------------
