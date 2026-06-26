@@ -43,13 +43,14 @@ Four files are written to `/Workspace/Shared/hackathon/agentic-datamodeling/outp
 4. [Databricks Bundle Setup](#databricks-bundle-setup)
 5. [Model Serving Setup](#model-serving-setup)
 6. [Running the Pipeline](#running-the-pipeline)
-7. [Understanding the Outputs](#understanding-the-outputs)
-8. [Viewing the ER Diagram](#viewing-the-er-diagram)
-9. [DDL and ERwin Import](#ddl-and-erwin-import)
-10. [Adding New Sources](#adding-new-sources)
-11. [Troubleshooting](#troubleshooting)
-12. [Project Structure](#project-structure)
-13. [Make Commands](#make-commands)
+7. [MCP Server — Claude Desktop Integration](#mcp-server--claude-desktop-integration)
+8. [Understanding the Outputs](#understanding-the-outputs)
+9. [Viewing the ER Diagram](#viewing-the-er-diagram)
+10. [DDL and ERwin Import](#ddl-and-erwin-import)
+11. [Adding New Sources](#adding-new-sources)
+12. [Troubleshooting](#troubleshooting)
+13. [Project Structure](#project-structure)
+14. [Make Commands](#make-commands)
 
 ---
 
@@ -327,6 +328,144 @@ Jobs are named after your `sources.yml` entries:
 ```bash
 databricks bundle run discover_unity_prod -t prod
 databricks bundle run discover_erp_postgres -t prod
+```
+
+---
+
+## MCP Server — Claude Desktop Integration
+
+The MCP (Model Context Protocol) server wraps the `adm` package so you can trigger data modeling directly from Claude Desktop — no CLI needed.
+
+```
+"discover the public schema in PostgreSQL" → Claude calls discover_schema → results in chat
+"show me an ER diagram for the sales schema" → Claude calls get_er_diagram → Mermaid diagram in chat
+"run AI analysis on the public schema" → Claude calls run_ai_analysis → model + recommendations
+```
+
+All credentials are stored in a startup script and read from environment variables at runtime. Claude never asks you for a connection string, token, or warehouse ID.
+
+### How it works
+
+- **First request** — crawls live from Databricks or PostgreSQL, saves 4 output files to `~/adm-outputs/`, returns results.
+- **Repeat request** — finds the most recent saved file in `~/adm-outputs/` and returns it instantly (no DB connection).
+- **"Give me a new analysis"** — set `force_refresh=True`; bypasses cache and re-crawls live.
+
+### Prerequisites
+
+- Claude Desktop (Windows/macOS)
+- WSL2 with Ubuntu (Windows only) — Claude Desktop is on Windows, the Python code runs in WSL2
+- Python 3.10+ with the `adm` package installed: `pip install -e ".[dev,postgresql]"`
+- `mcp` package: `pip install mcp`
+
+### Step 1 — Create the startup script
+
+Create `/home/<you>/start_adm_mcp.sh` in WSL2:
+
+```bash
+#!/bin/bash
+
+# Databricks Unity Catalog
+export DATABRICKS_HOST=https://adb-<workspace-id>.azuredatabricks.net
+export DATABRICKS_TOKEN=<your-databricks-pat>
+export SERVING_ENDPOINT=databricks-claude-opus-4-8
+export DATABRICKS_CATALOG=<your-default-catalog>
+export WAREHOUSE_ID=<your-warehouse-id>            # optional — auto-selected if omitted
+
+# PostgreSQL (omit if not using PostgreSQL)
+export PG_CONNECTION_STRING="postgresql+psycopg2://user:pass@host:5432/dbname?sslmode=require"
+
+# Runtime
+export PYTHONPATH=/path/to/agentic-datamodeling/src
+exec /path/to/python -m adm.mcp_server
+```
+
+Make it executable: `chmod +x ~/start_adm_mcp.sh`
+
+> **WSL2 tip:** `localhost` in WSL2 refers to the Linux VM, not the Windows host. To reach a Windows-hosted PostgreSQL, use the Windows IP from `/etc/resolv.conf`:
+> ```bash
+> WIN_HOST=$(grep nameserver /etc/resolv.conf | awk '{print $2}')
+> export PG_CONNECTION_STRING="postgresql+psycopg2://user:pass@${WIN_HOST}:5432/mydb"
+> ```
+
+### Step 2 — Configure Claude Desktop
+
+Edit `%APPDATA%\Claude\claude_desktop_config.json` on Windows:
+
+```json
+{
+  "mcpServers": {
+    "data-modeling": {
+      "command": "C:\\Windows\\System32\\wsl.exe",
+      "args": ["-d", "Ubuntu-20.04", "bash", "/home/<you>/start_adm_mcp.sh"]
+    }
+  }
+}
+```
+
+> Replace `Ubuntu-20.04` with your actual WSL2 distro name (`wsl --list` to check). The `-d` flag is required — without it, WSL2 defaults to whichever distro was set as default (which may be Docker Desktop, not Ubuntu).
+
+Restart Claude Desktop. A hammer icon in the chat bar confirms the MCP server connected.
+
+### Available tools
+
+| Tool | What it does |
+|------|-------------|
+| `list_schemas` | List all schemas in the configured data source |
+| `discover_schema` | Crawl a schema — tables, columns, PKs, FKs, relationships. Saves all 4 output files on fresh crawl. |
+| `get_er_diagram` | Return a Mermaid ER diagram for a schema (cached after first crawl) |
+| `get_relationships` | List all detected relationships (explicit FK + inferred from column names) |
+| `get_table_info` | Columns, PKs, relationships, and sample rows for a specific table |
+| `run_ai_analysis` | Full AI pipeline — logical model (3NF), physical model, data quality, DDL recommendations |
+
+### Routing: Databricks vs PostgreSQL
+
+Every tool accepts a `source` parameter that Claude uses automatically based on your question:
+
+| `source` value | Behaviour |
+|---|---|
+| `"auto"` (default) | Uses `DATABRICKS_CATALOG` env var if set; otherwise falls back to `PG_CONNECTION_STRING` |
+| `"postgresql"` | Always uses `PG_CONNECTION_STRING`; ignores Databricks settings |
+| `"databricks"` | Always uses `DATABRICKS_CATALOG` + `DATABRICKS_TOKEN`; ignores PostgreSQL |
+
+**Example phrases that steer routing:**
+
+- *"show me the PostgreSQL schemas"* → Claude passes `source="postgresql"`
+- *"discover the public schema in Postgres"* → `source="postgresql"`, `schema="public"`
+- *"what tables are in the hackathon catalog?"* → `source="databricks"`
+- *"get me an ER diagram"* → `source="auto"`, resolved by env vars
+
+### Caching and output files
+
+On every fresh crawl, 4 files are saved to `~/adm-outputs/YYYY-MM-DD/HH-MM-SS/`:
+
+| File | Contents |
+|------|----------|
+| `databricks_{catalog}_{schema}.json` | Full metadata + relationships |
+| `databricks_{catalog}_{schema}.sql` | Databricks DDL |
+| `databricks_{catalog}_{schema}.erwin_notes.txt` | ERwin import instructions |
+| `databricks_{catalog}_{schema}.er_diagram.md` | Mermaid ER diagram |
+
+PostgreSQL outputs use `postgresql_{dbname}_{schema}.*` naming.
+
+Subsequent calls load from these saved files — no DB connection is made unless the user asks for a "new" or "fresh" analysis.
+
+### Troubleshooting MCP
+
+**Hammer icon not visible in Claude Desktop**
+- Check Claude Desktop logs: `%APPDATA%\Claude\logs\`
+- Common causes: wrong WSL distro name in `-d` flag; startup script not executable; Python path wrong in script.
+
+**"No Databricks credentials" when asking about PostgreSQL**
+- The `DATABRICKS_CATALOG` env var is set, so `source="auto"` defaults to Databricks. Ask Claude explicitly: *"use PostgreSQL"* or *"query the Postgres database"*.
+
+**MCP server silent on stdio — how to verify it's running**
+```bash
+# Check if the process is alive
+wsl -d Ubuntu-20.04 pgrep -f mcp_server
+
+# Restart
+wsl -d Ubuntu-20.04 pkill -f mcp_server
+# Then restart Claude Desktop
 ```
 
 ---

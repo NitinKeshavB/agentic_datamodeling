@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "data-modeling": {
+      "command": "C:\\Windows\\System32\\wsl.exe",
+      "args": ["-d", "Ubuntu-20.04", "bash", "/home/nitinkeshav/start_adm_mcp.sh"]
+    }
+  }
+}

@@ -75,6 +75,7 @@ agentic-datamodeling/
         ├── agents/
         │   ├── __init__.py
         │   └── catalog_agent.py              ← CatalogAgent (5-phase OpenAI-compatible tool-use loop)
+        ├── mcp_server.py                     ← FastMCP server — 6 tools, Claude Desktop integration
         ├── ddl/
         │   ├── __init__.py
         │   └── generator.py                  ← Databricks DDL + ERwin notes generator
@@ -359,6 +360,65 @@ Column names with spaces are auto-escaped with backticks.
 
 **ERwin import:** File → Reverse Engineer → From Script → select `.sql` → dialect: Databricks (2021+) or Generic ANSI SQL.
 
+### `adm/mcp_server.py` — MCP Server (Claude Desktop)
+
+FastMCP server exposing 6 tools so Claude Desktop can trigger the full pipeline conversationally.
+
+**Entry point:** `python -m adm.mcp_server` (stdio transport, default) or `--transport sse --port 8000`.
+
+**Tools:**
+
+| Tool | Parameters | Purpose |
+|------|-----------|---------|
+| `list_schemas` | `source`, `catalog` | List schemas in Databricks or PostgreSQL |
+| `discover_schema` | `schema`, `source`, `catalog`, `force_refresh` | Crawl schema; save 4 output files |
+| `get_er_diagram` | `schema`, `source`, `catalog`, `force_refresh` | Return Mermaid ER diagram |
+| `get_relationships` | `schema`, `source`, `catalog`, `table_name`, `force_refresh` | List FK + inferred relationships |
+| `get_table_info` | `schema`, `table_name`, `source`, `catalog`, `sample_rows`, `force_refresh` | Column metadata + sample rows |
+| `run_ai_analysis` | `schema`, `source`, `catalog`, `force_refresh` | Full AI pipeline (logical/physical model) |
+
+**`source` parameter routing:**
+
+| Value | Behaviour |
+|-------|-----------|
+| `"auto"` | Uses `DATABRICKS_CATALOG` env var if set; else `PG_CONNECTION_STRING` |
+| `"postgresql"` | Always uses `PG_CONNECTION_STRING`; ignores Databricks settings |
+| `"databricks"` | Always uses `DATABRICKS_CATALOG` + `DATABRICKS_TOKEN` |
+
+**Credential resolution (never ask the user):**
+
+| Env var | Used for |
+|---------|---------|
+| `DATABRICKS_HOST` | Databricks workspace URL |
+| `DATABRICKS_TOKEN` | Databricks PAT |
+| `DATABRICKS_CATALOG` | Default Unity Catalog catalog name |
+| `WAREHOUSE_ID` | Default SQL Warehouse (optional — auto-selected if unset) |
+| `SERVING_ENDPOINT` | Model Serving endpoint name |
+| `PG_CONNECTION_STRING` | PostgreSQL connection string (`postgresql+psycopg2://...`) |
+
+**Cache priority (when `force_refresh=False`):**
+1. Most recent `~/adm-outputs/**/{source}_{catalog}_{schema}.json` — file saved by a prior crawl
+2. `~/.adm_cache/{key}__crawl.json` — fast in-session crawl cache
+3. Live crawl from Databricks / PostgreSQL (saves files + updates cache)
+
+**Output file naming:**
+- Databricks: `~/adm-outputs/YYYY-MM-DD/HH-MM-SS/databricks_{catalog}_{schema}.*`
+- PostgreSQL: `~/adm-outputs/YYYY-MM-DD/HH-MM-SS/postgresql_{dbname}_{schema}.*`
+
+**Claude Desktop config (Windows + WSL2):**
+```json
+{
+  "mcpServers": {
+    "data-modeling": {
+      "command": "C:\\Windows\\System32\\wsl.exe",
+      "args": ["-d", "Ubuntu-20.04", "bash", "/home/<you>/start_adm_mcp.sh"]
+    }
+  }
+}
+```
+
+The `-d Ubuntu-20.04` flag is required — without it, WSL defaults to its default distro (often Docker Desktop on machines with Docker installed).
+
 ---
 
 ## Secrets
@@ -425,3 +485,8 @@ Code quality: `black` (line length 119), `isort`, `flake8`, `mypy`.
 - `make bundle-deploy` automatically runs `make generate-jobs` first — sources.yml is the single source of truth for all discovery jobs.
 - `JDBCConnector._normalise()` rewrites these prefixes to the correct SQLAlchemy dialect: `postgres://`, `postgresql://`, `postgresql+asyncpg://`, `jdbc:postgresql://` → `postgresql+psycopg2://`; `mssql://`, `jdbc:sqlserver://` → `mssql+pyodbc://`. psycopg2 is required for `sslmode` support.
 - On WSL2, `localhost` refers to the Linux VM, not the Windows host — use the nameserver IP from `/etc/resolv.conf` to reach Windows-hosted databases.
+- MCP server tools have no `connection_string` or `warehouse_id` parameters — these are resolved exclusively from env vars in the startup script. Never add them back to tool signatures or Claude will ask users for credentials.
+- MCP `source="auto"` defaults to Databricks when `DATABRICKS_CATALOG` is set, even if `PG_CONNECTION_STRING` is also set. Users must say "use PostgreSQL" or "query Postgres" to steer to `source="postgresql"`.
+- MCP server uses stdio transport by default (required for Claude Desktop). Logs go to stderr — they are invisible during normal operation but visible when running the script directly in a terminal. Pass `--transport sse --port 8000` to run as an HTTP server for debugging.
+- `_resolve_backend(source, catalog)` is the single routing function for all 6 tools — always call it first to get `(catalog, connection_string)`. Never call `_resolve_catalog` / `_resolve_connection_string` directly in tool bodies.
+- Saved output files in `~/adm-outputs/` are the primary cache. `~/.adm_cache/` is a secondary crawl-only cache. AI analysis results are cached separately in `~/.adm_cache/{key}.json`.

@@ -9,7 +9,7 @@ authors = [{ name = "data modeling expedition team", email = "nitinkeshav.bolla@
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
-dependencies = ["databricks-sdk>=0.20.0", "openai>=1.0.0", "sqlalchemy>=2.0.0", "pyyaml>=6.0"]
+dependencies = ["databricks-sdk>=0.20.0", "openai>=1.0.0", "sqlalchemy>=2.0.0", "pyyaml>=6.0", "mcp>=1.0.0"]
 classifiers = ["Programming Language :: Python :: 3"]
 keywords = ["databricks", "data-modeling", "agentic"]
 # version will be derived dynamically from version.txt via setuptools
@@ -18,6 +18,7 @@ dynamic = ["version"]
 [project.scripts]
 main = "adm.main:main"
 discover = "adm.main:discover"
+adm-mcp = "adm.mcp_server:main"
 
 # docs: https://setuptools.pypa.io/en/latest/userguide/pyproject_config.html#dynamic-metadata
 [tool.setuptools.dynamic]
